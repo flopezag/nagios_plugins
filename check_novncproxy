@@ -1,0 +1,143 @@
+#!/bin/sh
+
+# -*- coding: utf-8; version: 0.5 -*-
+#
+# Copyright 2014 Telefónica Investigación y Desarrollo, S.A.U
+#
+# This file is part of FI-WARE project.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at:
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# For those usages not covered by the Apache version 2.0 License please
+# contact with opensource@tid.es
+#
+
+# NAME
+#      check_novncproxy -- Check if the nova-novncproxy is up in the specified host(s).
+#
+# SYNOPSIS
+#      check_novncproxy [-h][-v][-V] -H 'a1.b1.c1.d1 a2.b2.c2.d2 ...'
+#
+# DESCRIPTION
+#      This check displays the status of the nova-novncproxy in the list of provided hosts.
+#      If only one IP address is especified check that the service is up there, if there is
+#      more than one return OK if all of them are running CRITICAL if there is at least one
+#      of them down and ERROR if all of them are down.
+#
+#      Options:
+#          -h, --help          show this help message and exit.
+#          -V, --version       show version information and exit.
+#          -v, --verbose       show verbose messages.
+#          -H, --hosts list    check the list of hosts.
+#
+# EXIT STATUS
+#      The check_novncproxy utility exits 0 on success, 1 if there is a warning and 2 if there is an error.
+
+
+OPTS="v(verbose)h(help)V(version)H(hosts):"
+PROG=$(basename $0)
+VERSION=$(awk '/-\*-/ {print "v" $(NF-1)}' $0)
+RELEASE=$(echo $VERSION | cut -d. -f1-3)
+aux=$(find / -name check_nrpe)
+NRPEFolder=$(dirname $aux)
+
+alias trim='tr -d \ '
+
+# Command line options defaults
+VERBOSE=false
+HOSTS=
+
+# Command line processing
+OPTERR=
+OPTSTR=$(echo :-:$OPTS | sed 's/([-_a-zA-Z0-9]*)//g')
+OPTHLP=$(awk '/^# *__/ { $2=sprintf("  %*s",'${#PROG}'," ") } { print }' $0 | sed -n '27,48p' | sed 's/#/\\n/g')
+
+while getopts $OPTSTR OPT; do while [ -z "$OPTERR" ]; do
+case $OPT in
+'v')	VERBOSE=true;;
+'h')	OPTERR="$OPTHLP";;
+'V')	OPTERR="$VERSION"; printf "$OPTERR\n" 1>&2; exit 1;;
+'H')    HOSTS=$OPTARG;;
+'?')	OPTERR="Unknown option -$OPTARG";;
+':')	OPTERR="Missing value for option -$OPTARG";;
+'-')	OPTLONG="${OPTARG%=*}";
+	OPT=$(expr $OPTS : ".*\(.\)($OPTLONG):.*" '|' '?');
+	if [ "$OPT" = '?' ]; then
+		OPT=$(expr $OPTS : ".*\(.\)($OPTLONG).*" '|' '?')
+		OPTARG=-$OPTLONG
+	else
+		OPTARG=$(echo =$OPTARG | cut -d= -f3)
+		[ -z "$OPTARG" ] && { OPTARG=-$OPTLONG; OPT=':'; }
+	fi;
+	continue;;
+esac; break; done; done
+shift $(expr $OPTIND - 1)
+
+if [ -z "$HOSTS" ] && [ "$OPTERR" = "$OPTHLP" ]; then
+    OPTHLP=$(echo $OPTHLP | sed -e 's/NAME/\\033[1mNAME\\033[0m/g' \
+                                -e 's/SYNOPSIS/\\033[1mSYNOPSIS\\033[0m/g' \
+                                -e 's/DESCRIPTION/\\033[1mDESCRIPTION\\033[0m/g' \
+                                -e 's/EXIT STATUS/\\033[1mEXIT STATUS\\033[0m/g' \
+                                -e 's/check_novncproxy/\\tcheck_novncproxy/' \
+                                -e 's/This check/\\tThis check/' \
+                                -e 's/If only/\\tIf only/' \
+                                -e 's/more than/\\tmore than/' \
+                                -e 's/of them down/\\tof them down/' \
+                                -e 's/Options/\\tOptions/' \
+                                -e 's/The\\tcheck_novncproxy/\\tThe check_novncproxy/' \
+                                -e 's/-h, --help show/\\t\\t-h, --help\\t\\t show/' \
+                                -e 's/-V, --version show/\\t\\t-V, --version\\t\\t show/' \
+                                -e 's/-v, --verbose show/\\t\\t-v, --verbose\\t\\t show/' \
+                                -e 's/-H, --hosts list check/\\t\\t-H, --hosts list\\t check/' )
+
+	printf "$OPTHLP\n\n"
+    exit 1
+elif [ -z "$HOSTS" ]; then
+    echo "$PROG: Illegal number of parameters -- need to specify at least one host..."
+    echo ""
+    echo "Usage: $0 -H 'a1.b1.c1.d1 a2.b2.c2.d2 ...'"
+
+    exit 1
+fi
+
+len=0
+count=0
+ERRORLIST=()
+
+# Check the list of IPs to see if the nova-novncproxy is running there.
+
+for i in ${HOSTS[@]}; do
+    OK=$($NRPEFolder/check_nrpe -H $i -c check_procs -a 1: 1: nova-novncproxy | grep OK | wc -l)
+
+    if [ "$OK" = "0" ]; then
+        ERRORLIST[len]=$i
+    fi
+
+    len=$(( len + 1 ))
+    count=$(( count + OK ))
+done
+
+if [ "$count" = "$len" ]; then
+    echo "CHECK_NOVNCPROXYs OK: All processes are running|procs=$count/$len"
+    exit 0
+elif [ "$count" -gt "0" ]; then
+    echo "CHECK_NOVNCPROXYs WARNING: Some processes are not running (${ERRORLIST[*]})|procs=$count/$len"
+    exit 1
+else
+    echo "CHECK_NOVNCPROXYs CRITICAL: Cannot find any nova-novncproxy running |procs=$count/$len"
+    exit 2
+fi
+
+# End of file

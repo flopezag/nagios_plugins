@@ -1,0 +1,79 @@
+#!/bin/bash
+# -*- encoding: utf-8 -*-
+#
+# Copyright 2014 Telefónica Investigación y Desarrollo, S.A.U
+#
+# This file is part of FI-WARE project.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# You may obtain a copy of the License at:
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# For those usages not covered by the Apache version 2.0 License please
+# contact with opensource@tid.es
+#
+
+declare -a arr=("ceilometer-agent-central" "ceilometer-agent-notification" "ceilometer-alarm-evaluator" "ceilometer-alarm-notifier" "ceilom
+eter-api" "ceilometer-collector")
+NUMBER_PROCESSES=${#arr[@]}
+
+function message {
+        ## declare an array variable
+        local MAX_NUMBER_PROCESSES=1
+        local missing_process=""
+
+        ## now loop through the above array
+        for i in "${arr[@]}"
+        do
+            cad=$(ps -ef | grep ceilometer | grep -v grep | grep -v check_ceilometer)
+            count=$(echo $cad | grep -c $i)
+            
+            if [ "$count" -lt "$MAX_NUMBER_PROCESSES" ]; then
+                missing_process=$missing_process" $i($count/$MAX_NUMBER_PROCESSES)"
+            fi
+        done
+
+        echo $missing_process
+}
+
+i=$(ps -ef | grep ceilometer | grep -v grep | grep -v check_ceilometer)
+numberproc=$(ps -ef | grep ceilometer | grep -v grep | grep -v check_ceilometer | wc -l)
+
+nameprocess=$(message)
+
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        sName="`echo $0|awk -F '/' '{print $NF}'`"
+        echo -e "\n\n\t\t### $sName Version 1.0###\n"
+        echo -e "# Usage:\t$sName [-h | --help]"
+        echo -e "\t\t= check that all ceilometer processes are up and running and check the port 8777\n"
+        echo "# EXAMPLE: \t/usr/lib64/nagios/plugins/$sName"
+        echo -e "\nCopyright (C) 2016 Telefonica I+D\n\n"
+        exit
+elif [ "$numberproc" -ge "$NUMBER_PROCESSES" ] && [ -z "$nameprocess" ]; then
+        # All the identified processes are running, therefore we check that
+        # TCP port is running properly.
+        check_tcp=$(./check_tcp -p 8777)
+
+        echo "OpenStack Ceilometer: $check_tcp"
+        exit 0
+else
+        # Some of the proccesses are missing, get information about them.
+
+        # Sintax of Script's Output
+        # [STATUS]- [INFORMATION TO BE DISPLAYED ON NAGIOS SERVER CONSOLE] | [INFORMATION TO BE DISPLAYED GRAPHICALLY]
+
+        echo "OpenStack Ceilometer CRITICAL: Missing processes: $nameprocess|MISSINGPROCESS=$nameprocess"
+        exit 2
+fi
+
+# End of file
